@@ -1,0 +1,108 @@
+/*
+3- Exibir o seu nome num conjunto de quatro displays.
+O seu nome deverá ser deslocado da direita para a esquerda
+de modo que uma pessoa possa ler seu nome que estará se
+deslocando nos displays. O intervalo entre cada troca de
+caractere deverá ser de meio segundo ( tempo para entrar uma nova letra).
+*/
+
+#include "stm32g0xx.h"
+
+int deco[] = {0x5E, 0x79, 0x06, 0x6D,0x79};
+//                D    E      I    S     E
+
+int disp_u, disp_d, disp_c, disp_m;
+int qual=0;
+int posicao=0;
+int pressb=0;
+int rodando=0;
+
+void multiplexa(int dado_u, int dado_d, int dado_c, int dado_m){
+	if(TIM6->SR & 0x01){//quando a flag estourar
+		TIM6->SR &= ~0x01;//limpa flag
+		GPIOB->ODR |= 0x780;//desliga os catodo(PB7-PB10)
+		GPIOB->ODR &= ~0x7F;//desliga os segmentos(PB0-PB6)
+
+	switch(qual){
+		case 0 :
+			GPIOB->ODR |= deco[dado_u];//liga os segmentos da unidade
+			GPIOB->ODR &= ~0x80;//liga disp uni(pb7)
+			qual=1;
+			break;
+		case 1 :
+			GPIOB->ODR |= deco[dado_d];
+			GPIOB->ODR &= ~0x100;//LIGA disp dezena(pb8)
+			qual=2;
+			break;
+		case 2:
+			GPIOB->ODR |= deco[dado_c];
+			GPIOB->ODR &= ~0x200;//LIga disp centena(pb9)
+			qual =3;
+			break;
+		case 3:
+			GPIOB->ODR |= deco[dado_m];
+			GPIOB->ODR &= ~0x400;//Liga pb10
+			qual=0;
+			break;
+		}
+	}
+}
+
+int main(){
+	RCC->IOPENR =0x3F;
+
+	GPIOB->MODER = 0x155555;//pb0-pb6 segmentos, pb7-pb10disp
+	GPIOC->MODER &= ~0x03;//botao pc0 como entrada
+	GPIOC->PUPDR |=0x0A;
+
+	RCC->APBENR1 |= 0x20;
+  //TIM7->ARR = 7999;//0,5s
+    TIM7->ARR = 15999;//1s
+  //TIM7->ARR = 31999;//2s
+    TIM7->PSC = 999;
+    TIM7->CR1 = 0x01;
+
+    RCC->APBENR1 |= 0x10;
+    TIM6->ARR = 79;//1kHz para multiplexação
+    TIM6->PSC = 999;
+    TIM6->CR1 = 0x01;
+
+    //posicoes iniciais - CORRIGIDO: "D E I S"
+    disp_u = 0; // D - display mais à esquerda
+    disp_d = 1; // E
+    disp_c = 2; // I
+    disp_m = 3; // S - display mais à direita
+    posicao = 4; // próximo: E
+
+    while(1){
+    int bot= (GPIOC->IDR & 0x01);	//ler IDR em vez de ODR
+
+    //debounce botao - MESMA LOGICA
+    if(pressb) {//se pressionou
+  		if(TIM7->SR & 0x01) {//se passou os 500ms
+  			if(bot == 0) pressb = 0;//e o bot ta solto
+  			TIM7->SR &= ~0x01;//limpa flag do timer
+  		}
+    }
+    else {//masss se ainda não registrou
+  	    if(bot == 1) {//e o bot foi pressionado
+   	        pressb = 1;//marca q pressionou
+   	        rodando=1;
+  	    }
+    }
+
+   	//cada vez q o time passar - so se estiver rodando
+   	if(rodando && (TIM7->SR & 0x01)){
+    		TIM7->SR &= ~0x01;
+
+    //vai trocar as posicao - CORRIGIDO: direita para esquerda
+    disp_u = disp_d;  // D ← E
+    disp_d = disp_c;  // E ← I
+    disp_c = disp_m;  // I ← S
+    disp_m = posicao; // S ← E
+    posicao = (posicao+1)%5;//vai de 0 a 4
+   	}
+
+    multiplexa(disp_u, disp_d, disp_c, disp_m);
+    }
+}
