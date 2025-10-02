@@ -1,0 +1,150 @@
+//2- Implementar um contador crescente/decrescente de pulsos de 0 a 9999 ou 9999 até 0.
+//este contador deverá ter uma chave para selecionar a função crescente ou decrescente. Lembre-se, contar pulsos.
+
+#include "stm32g0xx.h"
+
+int deco[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};//num de 0 a 9
+int qual = 0;
+
+void multiplexa(int dado_u, int dado_d, int dado_c, int dado_m) {
+    if(TIM6->SR & 0x01) {
+        TIM6->SR &= ~0x01;
+        GPIOB->ODR |= 0x780;//desliga displays PB7, PB8, PB9, PB10
+        GPIOB->ODR &= ~0x7F;//limpa segmentos PB0-PB6
+
+        switch(qual) {
+            case 0:
+                GPIOB->ODR = (GPIOB->ODR & ~0x7F) | deco[dado_u];//segmentos unidade
+                GPIOB->ODR &= ~0x80;//liga display unidade PB7
+                qual = 1;
+                break;
+            case 1:
+                GPIOB->ODR = (GPIOB->ODR & ~0x7F) | deco[dado_d];//segmentos dezena
+                GPIOB->ODR &= ~0x100;//liga display dezena PB8
+                qual = 2;
+                break;
+            case 2:
+                GPIOB->ODR = (GPIOB->ODR & ~0x7F) | deco[dado_c];//segmentos centena
+                GPIOB->ODR &= ~0x200;//liga display centena PB9
+                qual = 3;
+                break;
+            case 3:
+                GPIOB->ODR = (GPIOB->ODR & ~0x7F) | deco[dado_m];//segmentos milhar
+                GPIOB->ODR &= ~0x400;//liga display milhar PB10
+                qual = 0;
+                break;
+        }
+    }
+}
+
+int main() {
+    int cont_u = 0, cont_d = 0, cont_c = 0, cont_m = 0;
+    int pressb1 = 0, pressb2 = 0;
+
+    RCC->IOPENR = 0x03F;//habilita clock portas A, B, C
+
+    //configura PB0-PB6 como saída (segmentos) e PB7-PB10 como saída (displays)
+    GPIOB->MODER = 0x15555555;
+
+    //configura PC0 e PC1 como entrada (botões)
+    GPIOC->MODER = 0x00;//PC0 e PC1 entrada
+    GPIOC->PUPDR |= 0x0A;//pull-down em PC0 e PC1
+
+    //configura timer 7 para debounce
+    RCC->APBENR1 |= 0x20;
+    TIM7->ARR = 159;//10ms para debounce
+    TIM7->PSC = 999;
+    TIM7->CR1 = 0x01;
+
+    //configura timer 6 para multiplexação
+    RCC->APBENR1 |= 0x10;
+    TIM6->ARR = 79;//1kHz para multiplexação
+    TIM6->PSC = 999;
+    TIM6->CR1 = 0x01;
+
+    while(1) {
+        //leitura dos botões
+        int b1 = GPIOC->IDR & 0x01;//botão B1 (PC0) - incrementa
+        int b2 = GPIOC->IDR & 0x02;//botão B2 (PC1) - decrementa
+
+        //botão B1 - incrementa
+        if(b1 && pressb1 == 0) {
+            pressb1 = 1;
+
+            //incrementa unidades
+            cont_u++;
+            if(cont_u > 9) {
+                cont_u = 0;
+                cont_d++;
+                if(cont_d > 9) {
+                    cont_d = 0;
+                    cont_c++;
+                    if(cont_c > 9) {
+                        cont_c = 0;
+                        cont_m++;
+                        if(cont_m > 9) {
+                            cont_m = 9;//mantém em 9999
+                            cont_c = 9;
+                            cont_d = 9;
+                            cont_u = 9;
+                        }
+                    }
+                }
+            }
+        }
+
+        //debounce B1
+        if(pressb1) {
+            if(TIM7->SR & 0x01) {
+                TIM7->SR &= ~0x01;//limpa flag
+                if(b1 == 0) pressb1 = 0;//só libera quando soltar
+            }
+        }
+
+        //botão B2 - decrementa
+        if(b2 && pressb2 == 0) {
+            pressb2 = 1;
+
+            //verifica se não está em 0
+            if(cont_m != 0 || cont_c != 0 || cont_d != 0 || cont_u != 0) {
+                //decrementa unidades
+                cont_u--;
+                if(cont_u < 0) {
+                    cont_u = 9;
+                    cont_d--;
+                    if(cont_d < 0) {
+                        cont_d = 9;
+                        cont_c--;
+                        if(cont_c < 0) {
+                            cont_c = 9;
+                            cont_m--;
+                            if(cont_m < 0) {
+                                cont_m = 0;//para em 0
+                                cont_c = 0;
+                                cont_d = 0;
+                                cont_u = 0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        //debounce B2
+        if(pressb2) {
+            if(TIM7->SR & 0x01) {
+                TIM7->SR &= ~0x01;//limpa flag
+                if(b2 == 0) pressb2 = 0;//só libera quando soltar
+            }
+        }
+
+        //acende LED quando chega em 9999
+        if(cont_u == 9 && cont_d == 9 && cont_c == 9 && cont_m == 9) {
+            GPIOA->ODR |= 0x01;//acende LED
+        } else {
+            GPIOA->ODR &= ~0x01;//apaga LED
+        }
+
+        multiplexa(cont_u, cont_d, cont_c, cont_m);
+    }
+}
